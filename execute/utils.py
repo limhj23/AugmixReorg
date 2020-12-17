@@ -1,5 +1,6 @@
 import os
 import matplotlib.pyplot as plt
+import numpy as np
 
 class CTLHistory:
     def __init__(self,
@@ -57,13 +58,17 @@ class CTLHistory:
 
 class ProgressTracker():
     def __init__(self):
-        self.loss = 100
-        self.delta = self.loss * 0.01
+        self.loss = None
+        self.delta = 0.0
     
     def check_update(self, val_loss):
         improved = False
-        if val_loss - self.loss > self.delta:
+        if self.loss is None:
             self.loss = val_loss
-            improved = True
+        else:
+            if self.loss - val_loss > self.delta:
+                self.loss = val_loss
+                self.delta = val_loss*0.01
+                improved = True
         return improved
 

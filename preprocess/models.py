@@ -48,8 +48,9 @@ def fine_tune(model, layer_num):
 
 def jsd_loss_fn(y_true, y_pred_clean, y_pred_aug1, y_pred_aug2):
     kld = K.losses.KLDivergence()
+    entropy = K.losses.CategoricalCrossentropy()
     # cross entropy loss that is used for clean images only
-    loss = K.losses.CategoricalCrossentropy(y_true, y_pred_clean)
+    loss = entropy(y_true, y_pred_clean)
 
     mixture = (y_pred_clean + y_pred_aug1 + y_pred_aug2) / 3.
 

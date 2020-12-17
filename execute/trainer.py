@@ -15,12 +15,16 @@ import execute.utils as utils
 from sklearn.model_selection import KFold
 import numpy as np
 import os
+from tensorflow.keras.backend import clear_session
+import shutil
 
+physical_devices = tf.config.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 @tf.function
 def train_step(model, clean, aug1, aug2, labels, optim):
     with tf.GradientTape() as tape:
-        # get predictions on clean images
+        # get predictions on clean imagesgi
         y_pred_clean = model(clean, training=True)
         
         # get predictions on augmented images
@@ -39,8 +43,9 @@ def train_step(model, clean, aug1, aug2, labels, optim):
 
 @tf.function
 def validate_step(model, images, labels):
+    entropy = tf.keras.losses.CategoricalCrossentropy()
     y_pred = model(images, training=False)
-    loss = tf.keras.losses.CategoricalCrossentropy(labels, y_pred)
+    loss = entropy(labels, y_pred)
     return loss, y_pred
 
 def main(dataname):
@@ -57,6 +62,7 @@ def main(dataname):
     np.random.shuffle(Y)
 
     num_classes = len(Y[0])
+    print("num_classes",num_classes)
     batch_size = 32
 
     scores = []
@@ -89,19 +95,21 @@ def main(dataname):
         nb_test_steps = int(np.ceil(len(x_test) / batch_size))
 
         starting_epoch = 0
-        nb_epochs = 100
-        save_dir_path = "../checkpoints"
-
+        nb_epochs = 45
+        
+        save_dir_path = os.path.join("./checkpoints",f"{dataname}_fold_{k}")
+        if os.path.exists(save_dir_path):
+            shutil.rmtree(save_dir_path)
 
         total_steps = nb_train_steps * nb_epochs
 
 
         # get the optimizer
         # SGD with cosine lr is causing NaNs. Need to investigate more
-        optim = optimizers.Adam(learning_rate=0.0001) 
+        optim = optimizers.Adam(learning_rate=0.0001)
         model = models.get_resnet50(num_classes)
 
-        checkpoint_prefix = os.path.join(save_dir_path,f"{dataname}_fold_{k}", "ckpt")
+        checkpoint_prefix = os.path.join(save_dir_path,"ckpt")
         checkpoint = tf.train.Checkpoint(optimizer=optim, model=model)
         checkpoint_manager = tf.train.CheckpointManager(checkpoint, 
                                                         directory=save_dir_path,
@@ -166,3 +174,5 @@ def main(dataname):
             train_accuracy.reset_states()
             test_loss.reset_states() 
             test_accuracy.reset_states()
+    
+        clear_session()
