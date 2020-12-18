@@ -17,29 +17,33 @@ import numpy as np
 import os
 from tensorflow.keras.backend import clear_session
 import shutil
+import json
 
 physical_devices = tf.config.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
-@tf.function
-def train_step(model, clean, aug1, aug2, labels, optim):
-    with tf.GradientTape() as tape:
-        # get predictions on clean imagesgi
-        y_pred_clean = model(clean, training=True)
-        
-        # get predictions on augmented images
-        y_pred_aug1 = model(aug1, training=True)
-        y_pred_aug2 = model(aug2, training=True)
+def train_step():
+    @tf.function
+    def apply_grad(model, clean, aug1, aug2, labels, optim):
+        with tf.GradientTape() as tape:
+            # get predictions on clean imagesgi
+            y_pred_clean = model(clean, training=True)
+            
+            # get predictions on augmented images
+            y_pred_aug1 = model(aug1, training=True)
+            y_pred_aug2 = model(aug2, training=True)
 
-        # calculate loss
-        loss_value = models.jsd_loss_fn(y_true = labels, 
-                            y_pred_clean = y_pred_clean,
-                            y_pred_aug1 = y_pred_aug1,
-                            y_pred_aug2 = y_pred_aug2)
-        
-    grads = tape.gradient(loss_value, model.trainable_variables)
-    optim.apply_gradients(zip(grads, model.trainable_variables))
-    return loss_value, y_pred_clean
+            # calculate loss
+            loss_value = models.jsd_loss_fn(y_true = labels, 
+                                y_pred_clean = y_pred_clean,
+                                y_pred_aug1 = y_pred_aug1,
+                                y_pred_aug2 = y_pred_aug2)
+            
+        grads = tape.gradient(loss_value, model.trainable_variables)
+        optim.apply_gradients(zip(grads, model.trainable_variables))
+        return loss_value, y_pred_clean
+    
+    return apply_grad
 
 @tf.function
 def validate_step(model, images, labels):
@@ -47,6 +51,15 @@ def validate_step(model, images, labels):
     y_pred = model(images, training=False)
     loss = entropy(labels, y_pred)
     return loss, y_pred
+
+def count_class(y):
+    num_classes = len(y[0])
+    cnts = [0 for i in range(num_classes)]
+    for onehot in y:
+        onehot = onehot.tolist()
+        ind = onehot.index(1.0)
+        cnts[ind] += 1
+    return cnts
 
 def main(dataname):
     # metric to keep track of 
@@ -63,7 +76,7 @@ def main(dataname):
 
     num_classes = len(Y[0])
     print("num_classes",num_classes)
-    batch_size = 32
+    batch_size = 16
 
     scores = []
     kf = KFold(n_splits=3)
@@ -75,6 +88,9 @@ def main(dataname):
         y_train = Y[train_index]
         x_test = X[test_index]
         y_test = Y[test_index]
+        
+        print("y_train", count_class(y_train))
+        print("y_test", count_class(y_test))
 
         test_indices = np.arange(len(x_test))
 
@@ -95,7 +111,7 @@ def main(dataname):
         nb_test_steps = int(np.ceil(len(x_test) / batch_size))
 
         starting_epoch = 0
-        nb_epochs = 45
+        nb_epochs = 100
         
         save_dir_path = os.path.join("./checkpoints",f"{dataname}_fold_{k}")
         if os.path.exists(save_dir_path):
@@ -115,6 +131,7 @@ def main(dataname):
                                                         directory=save_dir_path,
                                                         max_to_keep=10)
 
+        train_step_fn = train_step()
         for epoch in range(starting_epoch, nb_epochs):
             pbar = Progbar(target=nb_train_steps, interval=0.5, width=30)
             # Train for an epoch and keep track of 
@@ -125,7 +142,7 @@ def main(dataname):
 
                 # Get the batch data 
                 clean, aug1, aug2 = images
-                loss_value, y_pred_clean = train_step(model, clean, aug1, aug2, labels, optim)
+                loss_value, y_pred_clean = train_step_fn(model, clean, aug1, aug2, labels, optim)
 
                 # Record batch loss and batch accuracy
                 train_loss(loss_value)
@@ -174,5 +191,18 @@ def main(dataname):
             train_accuracy.reset_states()
             test_loss.reset_states() 
             test_accuracy.reset_states()
-    
+
+        scores.append(pt.loss)
         clear_session()
+    
+    min_score = min(scores)
+    with open(f"saved/{dataname}_result.json", "w+") as jf:
+        myd = {
+            'dataname': dataname,
+            'score': float(min_score),
+            'fold': scores.index(min_score)
+        }
+        json.dump(myd, jf)
+        jf.close()
+
+    print("scores : ", scores)
