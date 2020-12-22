@@ -29,8 +29,8 @@ def make_imageset(pathset):
     imageset = [np.array(Image.open(path).resize(resz, resample = Image.BILINEAR)) for path in pathset]
     return np.asarray(imageset)
 
-def get_imgset_lblset(dataname = 'testimg'):
-    cwd = "data/train"
+def get_imgset_lblset(dataname, mode = "train"):
+    cwd = f"data/{mode}"
     classes = os.listdir(os.path.join(cwd, dataname))
     num_classes = len(classes)
     clsidx = [i for i in range(num_classes)]

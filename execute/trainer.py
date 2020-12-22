@@ -22,9 +22,10 @@ import json
 physical_devices = tf.config.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
-def train_step():
+def train_step(expr):
+
     @tf.function
-    def apply_grad(model, clean, aug1, aug2, labels, optim):
+    def augmix_grad(model, clean, aug1, aug2, labels, optim):
         with tf.GradientTape() as tape:
             # get predictions on clean imagesgi
             y_pred_clean = model(clean, training=True)
@@ -43,7 +44,22 @@ def train_step():
         optim.apply_gradients(zip(grads, model.trainable_variables))
         return loss_value, y_pred_clean
     
-    return apply_grad
+    @tf.function
+    def default_grad(model, clean, labels, optim):
+        entropy = tf.keras.losses.CategoricalCrossentropy()
+        with tf.GradientTape() as tape:
+            # get predictions on clean imagesgi
+            y_pred_clean = model(clean, training=True)
+            loss_value = entropy(labels, y_pred_clean)
+        
+        grads = tape.gradient(loss_value, model.trainable_variables)
+        optim.apply_gradients(zip(grads, model.trainable_variables))
+        return loss_value, y_pred_clean
+            
+    if expr:
+        return augmix_grad
+    else:
+        return default_grad
 
 @tf.function
 def validate_step(model, images, labels):
@@ -61,7 +77,7 @@ def count_class(y):
         cnts[ind] += 1
     return cnts
 
-def main(dataname):
+def main(dataname, expr):
     # metric to keep track of 
     train_accuracy = tf.keras.metrics.CategoricalAccuracy()
     test_accuracy = tf.keras.metrics.CategoricalAccuracy()
@@ -69,9 +85,9 @@ def main(dataname):
     test_loss = tf.keras.metrics.Mean()
 
     X, Y = get_imgset_lblset(dataname)
-    np.random.seed(1204)
+    np.random.seed(1218)
     np.random.shuffle(X)
-    np.random.seed(1204)
+    np.random.seed(1218)
     np.random.shuffle(Y)
 
     num_classes = len(Y[0])
@@ -97,13 +113,13 @@ def main(dataname):
         # get the training data generator. We are not using validation generator because the 
         # data is already loaded in memory and we don't have to perform any extra operation 
         # apart from loading the validation images and validation labels.
-        ds = DataGenerator(x_train, y_train, num_classes = num_classes, batch_size=batch_size)
+        ds = DataGenerator(x_train, y_train, num_classes = num_classes, batch_size=batch_size, jsd = expr)
         enqueuer = OrderedEnqueuer(ds, use_multiprocessing=False)
         enqueuer.start(workers=1)
         train_ds = enqueuer.get()
 
         plot_name = f"history_{dataname}_fold_{k}.png"
-        history = utils.CTLHistory(filename=plot_name)
+        history = utils.CTLHistory(expr = expr, filename=plot_name)
 
         pt = utils.ProgressTracker()
 
@@ -129,9 +145,9 @@ def main(dataname):
         checkpoint = tf.train.Checkpoint(optimizer=optim, model=model)
         checkpoint_manager = tf.train.CheckpointManager(checkpoint, 
                                                         directory=save_dir_path,
-                                                        max_to_keep=10)
+                                                        max_to_keep=5)
 
-        train_step_fn = train_step()
+        train_step_fn = train_step(False)
         for epoch in range(starting_epoch, nb_epochs):
             pbar = Progbar(target=nb_train_steps, interval=0.5, width=30)
             # Train for an epoch and keep track of 
@@ -139,10 +155,23 @@ def main(dataname):
             for bno, (images, labels) in enumerate(train_ds):
                 if bno == nb_train_steps:
                     break
+                
+                if expr:
+                    # Get the batch data 
+                    clean, aug1, aug2 = images
+                    
+                    const05 = 0.5
+                    randnum = np.random.uniform(0.0, 1.0)
+                    if randnum > const05:
+                        my_input = aug1
+                    else:
+                        my_input = aug2
 
-                # Get the batch data 
-                clean, aug1, aug2 = images
-                loss_value, y_pred_clean = train_step_fn(model, clean, aug1, aug2, labels, optim)
+                    # loss_value, y_pred_clean = train_step_fn(model, clean, aug1, aug2, labels, optim)
+                    loss_value, y_pred_clean = train_step_fn(model, my_input, labels, optim)
+                else:
+                    clean = images
+                    loss_value, y_pred_clean = train_step_fn(model, clean, labels, optim)
 
                 # Record batch loss and batch accuracy
                 train_loss(loss_value)
@@ -196,9 +225,14 @@ def main(dataname):
         clear_session()
     
     min_score = min(scores)
-    with open(f"saved/{dataname}_result.json", "w+") as jf:
+    if expr:
+        SAVED = "saved/exp"
+    else:
+        SAVED = "saved/default"
+    with open(f"{SAVED}/{dataname}_result.json", "w+") as jf:
         myd = {
             'dataname': dataname,
+            'num_classes': num_classes,
             'score': float(min_score),
             'fold': scores.index(min_score)
         }

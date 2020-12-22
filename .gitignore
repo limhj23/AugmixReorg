@@ -54,3 +54,5 @@ venv/
 checkpoints/
 plots/
 .vscode*
+saved/
+*.ipynb

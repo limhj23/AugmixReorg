@@ -1,18 +1,25 @@
 import os
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 
 class CTLHistory:
     def __init__(self,
+                 expr,
                  filename="history.png",
-                 save_dir='plots'):
+                 save_dir='plots',
+                ):
         
         self.history = {'train_loss':[], 
                         "train_acc":[], 
                         "val_loss":[], 
                         "val_acc":[]}
         
-        self.save_dir = save_dir
+        if expr:
+            self.save_dir = os.path.join(save_dir, "exp")
+        else:
+            self.save_dir = os.path.join(save_dir, "default")
         if not os.path.exists(self.save_dir):
             os.mkdir(self.save_dir)
 
